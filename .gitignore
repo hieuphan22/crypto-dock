@@ -1,0 +1,6 @@
+.dotnet-home/
+CryptoDock/AppPackages/
+CryptoDock/bin/
+CryptoDock/obj/
+CryptoDock/*.cer
+CryptoDock/*.pfx

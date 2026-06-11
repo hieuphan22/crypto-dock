@@ -1,0 +1,8 @@
+<Project>
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.CommandPalette.Extensions" Version="0.9.260303001" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.Windows.CsWin32" Version="0.3.275" />
+    <PackageVersion Include="Shmuelie.WinRTServer" Version="2.2.1" />
+  </ItemGroup>
+</Project>

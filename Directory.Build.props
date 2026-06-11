@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <BaseIntermediateOutputPath>C:\tmp\CryptoDockBuildNet10\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>C:\tmp\CryptoDockBuildNet10\bin\</BaseOutputPath>
+    <RestorePackagesPath>C:\tmp\CryptoDockPackages</RestorePackagesPath>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,42 @@
+using Microsoft.CommandPalette.Extensions.Toolkit;
+
+namespace CryptoDock;
+
+internal sealed partial class CryptoTickerDockItem : ListItem, IDisposable
+{
+    private readonly CopyTextCommand _copyCommand = new(string.Empty) { Name = "Copy price" };
+    private readonly WatchedSymbol _symbol;
+    private CryptoTicker? _lastTicker;
+
+    public CryptoTickerDockItem(WatchedSymbol symbol)
+    {
+        _symbol = symbol;
+        Command = new NoOpCommand() { Id = $"com.hieuphan.cmdpal.cryptodock.{symbol.Key}" };
+        Title = $"{DisplaySymbol} loading";
+        Subtitle = _symbol.MarketLabel;
+        Icon = new IconInfo("\uE8D7");
+        MoreCommands = [new CommandContextItem(_copyCommand)];
+    }
+
+    public void Dispose()
+    {
+    }
+
+    public void Update(CryptoTicker ticker)
+    {
+        _lastTicker = ticker;
+        Title = $"{DisplaySymbol} {ticker.PriceText}";
+        Subtitle = $"{ticker.ShortMarketLabel} {ticker.ChangeText}";
+        Icon = new IconInfo(ticker.DirectionIcon);
+        _copyCommand.Text = ticker.Summary;
+    }
+
+    public void MarkOffline()
+    {
+        Title = _lastTicker is null ? $"{DisplaySymbol} offline" : $"{DisplaySymbol} {_lastTicker.PriceText}";
+        Subtitle = _lastTicker is null ? "Binance unavailable" : $"Last {_lastTicker.UpdatedAt:HH:mm:ss}";
+        _copyCommand.Text = _lastTicker?.Summary ?? $"{DisplaySymbol} price unavailable";
+    }
+
+    private string DisplaySymbol => _symbol.DisplaySymbol;
+}

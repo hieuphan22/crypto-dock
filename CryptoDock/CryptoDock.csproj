@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <AssetTargetFallback>net8.0-windows10.0.22000.0</AssetTargetFallback>
+    <RootNamespace>CryptoDock</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <UseWinUI>false</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <GenerateAppxPackageOnBuild>true</GenerateAppxPackageOnBuild>
+    <AppxPackageSigningEnabled>true</AppxPackageSigningEnabled>
+    <PackageCertificateKeyFile>CryptoDock_TemporaryKey.pfx</PackageCertificateKeyFile>
+    <PackageCertificatePassword>CryptoDockLocal123!</PackageCertificatePassword>
+    <PackageCertificateThumbprint>362F28038BA9D0B1DD5F738BA5E942F033DB14CE</PackageCertificateThumbprint>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64;arm64</Platforms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\SplashScreen.scale-200.png" />
+    <Content Include="Assets\LockScreenLogo.scale-200.png" />
+    <Content Include="Assets\Square150x150Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
+    <Content Include="Assets\StoreLogo.png" />
+    <Content Include="Assets\Wide310x150Logo.scale-200.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CommandPalette.Extensions" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="Microsoft.Windows.CsWin32" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers" />
+    <PackageReference Include="Shmuelie.WinRTServer" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <ProjectCapability Include="Msix" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishAot>false</PublishAot>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishTrimmed>true</PublishTrimmed>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IsAotCompatible>true</IsAotCompatible>
+    <CsWinRTAotOptimizerEnabled>true</CsWinRTAotOptimizerEnabled>
+    <CsWinRTAotWarningLevel>2</CsWinRTAotWarningLevel>
+    <WarningsNotAsErrors>IL2081;IL2104;$(WarningsNotAsErrors)</WarningsNotAsErrors>
+    <ILLinkTreatWarningsAsErrors>true</ILLinkTreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>
