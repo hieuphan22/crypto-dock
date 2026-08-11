@@ -15,7 +15,11 @@ internal sealed partial class CryptoTickerDockItem : ListItem, IDisposable
         Title = $"{DisplaySymbol} loading";
         Subtitle = _symbol.MarketLabel;
         Icon = new IconInfo("\uE8D7");
-        MoreCommands = [new CommandContextItem(_copyCommand)];
+        MoreCommands =
+        [
+            new CommandContextItem(_copyCommand),
+            new CommandContextItem(new OpenUrlCommand(BinanceUrl(_symbol)) { Name = "Open Binance chart" }),
+        ];
     }
 
     public void Dispose()
@@ -39,4 +43,11 @@ internal sealed partial class CryptoTickerDockItem : ListItem, IDisposable
     }
 
     private string DisplaySymbol => _symbol.DisplaySymbol;
+
+    private static string BinanceUrl(WatchedSymbol symbol)
+    {
+        return symbol.Market == MarketKind.Futures
+            ? $"https://www.binance.com/vi/futures/{symbol.Symbol}"
+            : $"https://www.binance.com/vi/trade/{symbol.Symbol.Replace("USDT", "_USDT", StringComparison.OrdinalIgnoreCase)}";
+    }
 }

@@ -39,18 +39,16 @@ internal sealed partial class CryptoDockBand : WrappedDockItem, IDisposable
 
     private async Task RunRefreshLoopAsync(CancellationToken cancellationToken)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        try
         {
-            await RefreshAsync(cancellationToken);
-
-            try
+            while (!cancellationToken.IsCancellationRequested)
             {
+                await RefreshAsync(cancellationToken);
                 await _refreshSignal.WaitAsync(_settingsManager.RefreshInterval, cancellationToken);
             }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
+        }
+        catch (OperationCanceledException)
+        {
         }
     }
 
@@ -129,7 +127,7 @@ internal sealed partial class CryptoDockBand : WrappedDockItem, IDisposable
         {
             _refreshSignal.Release();
         }
-        catch (ObjectDisposedException)
+        catch (SemaphoreFullException)
         {
         }
     }
