@@ -26,12 +26,12 @@ internal sealed partial class CryptoTickerDockItem : ListItem, IDisposable
     {
     }
 
-    public void Update(CryptoTicker ticker)
+    public void Update(CryptoTicker ticker, VolatilityAlert? alert = null)
     {
         _lastTicker = ticker;
         Title = $"{DisplaySymbol} {ticker.PriceText}";
-        Subtitle = $"{ticker.ShortMarketLabel} {ticker.ChangeText}";
-        Icon = new IconInfo(ticker.DirectionIcon);
+        Subtitle = alert?.Label ?? $"{ticker.ShortMarketLabel} {ticker.ChangeText}";
+        Icon = new IconInfo(alert?.Icon ?? ticker.DirectionIcon);
         _copyCommand.Text = ticker.Summary;
     }
 

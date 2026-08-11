@@ -9,6 +9,7 @@ internal sealed partial class CryptoDockBand : WrappedDockItem, IDisposable
     private readonly CancellationTokenSource _cancellation = new();
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private readonly SemaphoreSlim _refreshSignal = new(0, 1);
+    private readonly VolatilityAlertTracker _volatilityAlerts = new();
     private Dictionary<string, CryptoTickerDockItem> _items = [];
 
     public CryptoDockBand(CryptoTickerService tickerService, SettingsManager settingsManager)
@@ -70,8 +71,16 @@ internal sealed partial class CryptoDockBand : WrappedDockItem, IDisposable
                 string key = new WatchedSymbol(ticker.Market, ticker.Symbol).Key;
                 if (_items.TryGetValue(key, out CryptoTickerDockItem? item))
                 {
-                    item.Update(ticker);
+                    VolatilityAlert? alert = _settingsManager.VolatilityAlertsEnabled
+                        ? _volatilityAlerts.Update(ticker, _settingsManager)
+                        : null;
+                    item.Update(ticker, alert);
                 }
+            }
+
+            if (!_settingsManager.VolatilityAlertsEnabled)
+            {
+                _volatilityAlerts.Clear();
             }
         }
         catch (OperationCanceledException)
@@ -114,6 +123,7 @@ internal sealed partial class CryptoDockBand : WrappedDockItem, IDisposable
                 symbol => new CryptoTickerDockItem(symbol));
 
         Items = _items.Values.ToArray();
+        _volatilityAlerts.KeepSymbols(_items.Keys);
     }
 
     private void SignalRefresh()

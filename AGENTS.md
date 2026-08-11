@@ -277,6 +277,7 @@ Settings:
   - `Spot + Futures`
   - `Spot only`
   - `Futures only`
+- Optional volatility alerts with configurable analysis window and thresholds.
 
 Events:
 
@@ -348,6 +349,11 @@ Implemented features:
 - Futures support for symbols such as `XAUUSDT` and `XAGUSDT`.
 - Renamed management page to `Manage Crypto Dock`.
 - Renamed actual dock band to `Crypto Tickers`.
+- Optional rolling volatility alerts:
+  - disabled by default
+  - analysis window: 15 minutes or 1 hour
+  - separate dump, rebound, and high-low range thresholds
+  - fixed 60-minute in-memory OHLC history per tracked coin while enabled
 - Upgraded project to `.NET 10`.
 - Moved source from OneDrive path to `E:\source\CryptoDock`.
 - Moved git repo to `E:\source\CryptoDock`.
@@ -536,4 +542,3 @@ E:\source\CryptoDock\CryptoDock\AppPackages\CryptoDock_1.0.0.0_x64_Debug_Test
   - `https://learn.microsoft.com/windows/powertoys/command-palette/sdk-namespaces`
 - Command Palette Toolkit:
   - `https://learn.microsoft.com/windows/powertoys/command-palette/microsoft-commandpalette-extensions-toolkit/`
-

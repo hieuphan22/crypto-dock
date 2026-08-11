@@ -44,6 +44,42 @@ internal sealed class SettingsManager : JsonSettingsManager
             new ChoiceSetSetting.Choice("Futures only", "Futures"),
         ]);
 
+    private readonly ChoiceSetSetting _volatilityAlertsEnabled = new(
+        Namespaced(nameof(VolatilityAlertsEnabled)),
+        "Volatility alerts",
+        "Show dock alerts for large price moves. Price history is collected only while enabled.",
+        [
+            new ChoiceSetSetting.Choice("Off", "false"),
+            new ChoiceSetSetting.Choice("On", "true"),
+        ]);
+
+    private readonly ChoiceSetSetting _volatilityWindow = new(
+        Namespaced(nameof(VolatilityWindowMinutes)),
+        "Alert analysis window",
+        "Compare price action across this rolling window.",
+        [
+            new ChoiceSetSetting.Choice("15 minutes", "15"),
+            new ChoiceSetSetting.Choice("1 hour", "60"),
+        ]);
+
+    private readonly ChoiceSetSetting _dumpThreshold = new(
+        Namespaced(nameof(DumpThresholdPercent)),
+        "Dump warning threshold",
+        "Alert when the current price falls this far from the window high.",
+        PercentageChoices("3", "5", "10"));
+
+    private readonly ChoiceSetSetting _reboundThreshold = new(
+        Namespaced(nameof(ReboundThresholdPercent)),
+        "Rebound warning threshold",
+        "Alert when the current price rises this far from the window low.",
+        PercentageChoices("3", "5", "10"));
+
+    private readonly ChoiceSetSetting _rangeThreshold = new(
+        Namespaced(nameof(RangeThresholdPercent)),
+        "Volatility range threshold",
+        "Alert when the high-to-low range reaches this size within the window.",
+        PercentageChoices("5", "10", "15"));
+
     public int RefreshIntervalSeconds =>
         int.TryParse(_refreshInterval.Value, out int seconds) ? seconds : 10;
 
@@ -51,6 +87,16 @@ internal sealed class SettingsManager : JsonSettingsManager
 
     public MarketSource MarketSource =>
         Enum.TryParse(_marketSource.Value, out MarketSource source) ? source : MarketSource.Both;
+
+    public bool VolatilityAlertsEnabled => bool.TryParse(_volatilityAlertsEnabled.Value, out bool enabled) && enabled;
+
+    public int VolatilityWindowMinutes => ParseChoice(_volatilityWindow.Value, 15);
+
+    public decimal DumpThresholdPercent => ParseDecimalChoice(_dumpThreshold.Value, 5m);
+
+    public decimal ReboundThresholdPercent => ParseDecimalChoice(_reboundThreshold.Value, 5m);
+
+    public decimal RangeThresholdPercent => ParseDecimalChoice(_rangeThreshold.Value, 10m);
 
     public IReadOnlyList<WatchedSymbol> Symbols
     {
@@ -69,6 +115,11 @@ internal sealed class SettingsManager : JsonSettingsManager
 
         Settings.Add(_refreshInterval);
         Settings.Add(_marketSource);
+        Settings.Add(_volatilityAlertsEnabled);
+        Settings.Add(_volatilityWindow);
+        Settings.Add(_dumpThreshold);
+        Settings.Add(_reboundThreshold);
+        Settings.Add(_rangeThreshold);
         LoadSettings();
         LoadSymbols();
 
@@ -165,4 +216,13 @@ internal sealed class SettingsManager : JsonSettingsManager
     {
         File.WriteAllLines(SymbolsPath(), _symbols.Select(symbol => symbol.Key));
     }
+
+    private static List<ChoiceSetSetting.Choice> PercentageChoices(params string[] values) =>
+        values.Select(value => new ChoiceSetSetting.Choice($"{value}%", value)).ToList();
+
+    private static int ParseChoice(string? value, int fallback) =>
+        int.TryParse(value, out int parsed) ? parsed : fallback;
+
+    private static decimal ParseDecimalChoice(string? value, decimal fallback) =>
+        decimal.TryParse(value, out decimal parsed) ? parsed : fallback;
 }
