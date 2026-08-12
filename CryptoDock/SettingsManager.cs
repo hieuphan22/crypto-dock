@@ -10,9 +10,6 @@ internal sealed class SettingsManager : JsonSettingsManager
     [
         WatchedSymbol.Spot("BTCUSDT"),
         WatchedSymbol.Spot("ETHUSDT"),
-        WatchedSymbol.Spot("BNBUSDT"),
-        WatchedSymbol.Spot("SOLUSDT"),
-        WatchedSymbol.Spot("XRPUSDT"),
     ];
 
     private readonly object _symbolsLock = new();
@@ -58,6 +55,8 @@ internal sealed class SettingsManager : JsonSettingsManager
         "Alert analysis window",
         "Compare price action across this rolling window.",
         [
+            new ChoiceSetSetting.Choice("3 minutes", "3"),
+            new ChoiceSetSetting.Choice("5 minutes", "5"),
             new ChoiceSetSetting.Choice("15 minutes", "15"),
             new ChoiceSetSetting.Choice("1 hour", "60"),
         ]);
@@ -66,19 +65,19 @@ internal sealed class SettingsManager : JsonSettingsManager
         Namespaced(nameof(DumpThresholdPercent)),
         "Dump warning threshold",
         "Alert when the current price falls this far from the window high.",
-        PercentageChoices("3", "5", "10"));
+        PercentageChoices("1", "3", "5", "10"));
 
     private readonly ChoiceSetSetting _reboundThreshold = new(
         Namespaced(nameof(ReboundThresholdPercent)),
         "Rebound warning threshold",
         "Alert when the current price rises this far from the window low.",
-        PercentageChoices("3", "5", "10"));
+        PercentageChoices("1", "3", "5", "10"));
 
     private readonly ChoiceSetSetting _rangeThreshold = new(
         Namespaced(nameof(RangeThresholdPercent)),
         "Volatility range threshold",
         "Alert when the high-to-low range reaches this size within the window.",
-        PercentageChoices("5", "10", "15"));
+        PercentageChoices("1", "2", "5", "10", "15"));
 
     public int RefreshIntervalSeconds =>
         int.TryParse(_refreshInterval.Value, out int seconds) ? seconds : 10;
@@ -92,11 +91,11 @@ internal sealed class SettingsManager : JsonSettingsManager
 
     public int VolatilityWindowMinutes => ParseChoice(_volatilityWindow.Value, 15);
 
-    public decimal DumpThresholdPercent => ParseDecimalChoice(_dumpThreshold.Value, 5m);
+    public decimal DumpThresholdPercent => ParseDecimalChoice(_dumpThreshold.Value, 3m);
 
-    public decimal ReboundThresholdPercent => ParseDecimalChoice(_reboundThreshold.Value, 5m);
+    public decimal ReboundThresholdPercent => ParseDecimalChoice(_reboundThreshold.Value, 3m);
 
-    public decimal RangeThresholdPercent => ParseDecimalChoice(_rangeThreshold.Value, 10m);
+    public decimal RangeThresholdPercent => ParseDecimalChoice(_rangeThreshold.Value, 5m);
 
     public IReadOnlyList<WatchedSymbol> Symbols
     {
@@ -112,6 +111,11 @@ internal sealed class SettingsManager : JsonSettingsManager
     public SettingsManager()
     {
         FilePath = SettingsJsonPath();
+
+        _volatilityWindow.Value = "15";
+        _dumpThreshold.Value = "3";
+        _reboundThreshold.Value = "3";
+        _rangeThreshold.Value = "5";
 
         Settings.Add(_refreshInterval);
         Settings.Add(_marketSource);
@@ -177,14 +181,22 @@ internal sealed class SettingsManager : JsonSettingsManager
 
     private static string SettingsJsonPath()
     {
+#if DEBUG
+        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cryptoDock");
+#else
         string directory = Utilities.BaseSettingsPath("Microsoft.CmdPal");
+#endif
         Directory.CreateDirectory(directory);
         return Path.Combine(directory, $"{Namespace}.settings.json");
     }
 
     private static string SymbolsPath()
     {
+#if DEBUG
+        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cryptoDock");
+#else
         string directory = Utilities.BaseSettingsPath("Microsoft.CmdPal");
+#endif
         Directory.CreateDirectory(directory);
         return Path.Combine(directory, $"{Namespace}.symbols.txt");
     }

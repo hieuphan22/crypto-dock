@@ -63,14 +63,12 @@ internal sealed class VolatilityAlertTracker
                 return null;
             }
 
-            int windowMinutes = Math.Clamp(settings.VolatilityWindowMinutes, 1, HistoryCapacityMinutes - 1);
-            DateTimeOffset windowStart = _bars[^1].Minute.AddMinutes(-windowMinutes);
-            if (_bars[0].Minute > windowStart)
-            {
-                return null;
-            }
+            int requestedWindow = Math.Clamp(settings.VolatilityWindowMinutes, 1, HistoryCapacityMinutes - 1);
+            DateTimeOffset windowStart = _bars[^1].Minute.AddMinutes(-requestedWindow);
 
             MinuteBar[] window = _bars.Where(bar => bar.Minute >= windowStart).ToArray();
+            int actualWindowMinutes = (int)(window[^1].Minute - window[0].Minute).TotalMinutes;
+            int windowMinutes = Math.Max(1, actualWindowMinutes);
             decimal current = window[^1].Close;
             decimal baseline = window[0].Open;
             decimal high = window.Max(bar => bar.High);
@@ -127,9 +125,9 @@ internal sealed record VolatilityAlert(VolatilityAlertKind Kind, decimal Percent
 {
     public string Label => Kind switch
     {
-        VolatilityAlertKind.Dump => $"DUMP -{Percent:0.##}%/{WindowLabel}",
-        VolatilityAlertKind.Rebound => $"REBOUND +{Percent:0.##}%/{WindowLabel}",
-        _ => $"VOLATILE {Percent:0.##}%/{WindowLabel}",
+        VolatilityAlertKind.Dump => $"🔴 DUMP -{Percent:0.##}%/{WindowLabel}",
+        VolatilityAlertKind.Rebound => $"🟢 REBOUND +{Percent:0.##}%/{WindowLabel}",
+        _ => $"🟠 VOLATILE {Percent:0.##}%/{WindowLabel}",
     };
 
     public string Icon => Kind switch

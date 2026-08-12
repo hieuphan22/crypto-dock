@@ -1,4 +1,6 @@
 using Microsoft.CommandPalette.Extensions.Toolkit;
+using Windows.Storage.Streams;
+using System;
 
 namespace CryptoDock;
 
@@ -29,9 +31,26 @@ internal sealed partial class CryptoTickerDockItem : ListItem, IDisposable
     public void Update(CryptoTicker ticker, VolatilityAlert? alert = null)
     {
         _lastTicker = ticker;
-        Title = $"{DisplaySymbol} {ticker.PriceText}";
+        Title = $"{ticker.Pair} {ticker.DirectionArrow} {ticker.PriceText}";
         Subtitle = alert?.Label ?? $"{ticker.ShortMarketLabel} {ticker.ChangeText}";
-        Icon = new IconInfo(alert?.Icon ?? ticker.DirectionIcon);
+        
+        if (ticker.HasLogo && !string.IsNullOrEmpty(ticker.LogoUrl))
+        {
+            try
+            {
+                var iconData = new IconData(RandomAccessStreamReference.CreateFromUri(new Uri(ticker.LogoUrl)));
+                Icon = new IconInfo(iconData);
+            }
+            catch
+            {
+                Icon = new IconInfo(alert?.Icon ?? ticker.DirectionIcon);
+            }
+        }
+        else
+        {
+            Icon = new IconInfo(alert?.Icon ?? ticker.DirectionIcon);
+        }
+
         _copyCommand.Text = ticker.Summary;
     }
 

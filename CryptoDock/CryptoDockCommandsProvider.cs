@@ -5,8 +5,8 @@ namespace CryptoDock;
 
 public sealed partial class CryptoDockCommandsProvider : CommandProvider
 {
-    private readonly CryptoTickerService _tickerService = new();
     private readonly SettingsManager _settingsManager = new();
+    private readonly CryptoTickerService _tickerService;
     private readonly CryptoDockPage _page;
     private readonly CryptoDockBand _dockBand;
 
@@ -16,6 +16,8 @@ public sealed partial class CryptoDockCommandsProvider : CommandProvider
         Id = "com.hieuphan.cmdpal.cryptodock";
         Icon = new IconInfo("\uE8D7");
         Settings = _settingsManager.Settings;
+        
+        _tickerService = new CryptoTickerService(_settingsManager);
 
         _page = new CryptoDockPage(_tickerService, _settingsManager);
         _dockBand = new CryptoDockBand(_tickerService, _settingsManager);
