@@ -52,6 +52,8 @@ internal sealed partial class CryptoDockPage : DynamicListPage
                     [
                         new CommandContextItem(new CopyTextCommand(ticker.DetailsText) { Name = "Copy details" }),
                         new CommandContextItem(new OpenUrlCommand(BinanceUrl(ticker)) { Name = "Open Binance" }),
+                        new CommandContextItem(new MoveUpCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
+                        new CommandContextItem(new MoveDownCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
                         new CommandContextItem(new RemoveSymbolCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
                     ],
                 })

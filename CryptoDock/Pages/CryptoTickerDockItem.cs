@@ -10,7 +10,7 @@ internal sealed partial class CryptoTickerDockItem : ListItem, IDisposable
     private readonly WatchedSymbol _symbol;
     private CryptoTicker? _lastTicker;
 
-    public CryptoTickerDockItem(WatchedSymbol symbol)
+    public CryptoTickerDockItem(WatchedSymbol symbol, SettingsManager settingsManager)
     {
         _symbol = symbol;
         Command = new NoOpCommand() { Id = $"com.hieuphan.cmdpal.cryptodock.{symbol.Key}" };
@@ -21,6 +21,9 @@ internal sealed partial class CryptoTickerDockItem : ListItem, IDisposable
         [
             new CommandContextItem(_copyCommand),
             new CommandContextItem(new OpenUrlCommand(BinanceUrl(_symbol)) { Name = "Open Binance chart" }),
+            new CommandContextItem(new MoveUpCommand(settingsManager, _symbol)),
+            new CommandContextItem(new MoveDownCommand(settingsManager, _symbol)),
+            new CommandContextItem(new RemoveSymbolCommand(settingsManager, _symbol)),
         ];
     }
 

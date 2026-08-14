@@ -34,14 +34,16 @@ internal sealed class CryptoTickerService : IDisposable
     {
         Timeout = TimeSpan.FromSeconds(10)
     };
-    private readonly HttpClient _coingeckoHttpClient = new()
+    private readonly HttpClient _coingeckoHttpClient = CreateClientWithUserAgent();
+    private readonly HttpClient _githubHttpClient = CreateClientWithUserAgent();
+
+    private static HttpClient CreateClientWithUserAgent()
     {
-        Timeout = TimeSpan.FromSeconds(5)
-    };
-    private readonly HttpClient _githubHttpClient = new()
-    {
-        Timeout = TimeSpan.FromSeconds(5)
-    };
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("CryptoDock/2.0");
+        return client;
+    }
+
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, BapiAssetInfo> _bapiCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string?> _coingeckoCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _githubLogoCache = new(StringComparer.OrdinalIgnoreCase);
@@ -201,8 +203,19 @@ internal sealed class CryptoTickerService : IDisposable
                         
                         if (doc.RootElement.TryGetProperty("coins", out JsonElement coinsElement) && coinsElement.ValueKind == JsonValueKind.Array && coinsElement.GetArrayLength() > 0)
                         {
-                            JsonElement firstCoin = coinsElement[0];
-                            if (firstCoin.TryGetProperty("large", out JsonElement largeElement) && largeElement.ValueKind == JsonValueKind.String)
+                            JsonElement bestMatch = coinsElement[0];
+                            foreach (JsonElement coin in coinsElement.EnumerateArray())
+                            {
+                                if (coin.TryGetProperty("symbol", out JsonElement symElement) && 
+                                    symElement.ValueKind == JsonValueKind.String && 
+                                    string.Equals(symElement.GetString(), baseAsset, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    bestMatch = coin;
+                                    break;
+                                }
+                            }
+
+                            if (bestMatch.TryGetProperty("large", out JsonElement largeElement) && largeElement.ValueKind == JsonValueKind.String)
                             {
                                 logoUrl = largeElement.GetString();
                                 hasLogo = !string.IsNullOrWhiteSpace(logoUrl);

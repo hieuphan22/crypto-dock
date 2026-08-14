@@ -179,6 +179,46 @@ internal sealed class SettingsManager : JsonSettingsManager
         return removed;
     }
 
+    public bool MoveSymbolUp(WatchedSymbol symbol)
+    {
+        symbol = new WatchedSymbol(symbol.Market, WatchedSymbol.NormalizeSymbol(symbol.Symbol));
+        bool moved = false;
+        lock (_symbolsLock)
+        {
+            int index = _symbols.FindIndex(existing => existing.Market == symbol.Market && string.Equals(existing.Symbol, symbol.Symbol, StringComparison.OrdinalIgnoreCase));
+            if (index > 0)
+            {
+                var item = _symbols[index];
+                _symbols.RemoveAt(index);
+                _symbols.Insert(index - 1, item);
+                SaveSymbols();
+                moved = true;
+            }
+        }
+        if (moved) SymbolsChanged?.Invoke(this, EventArgs.Empty);
+        return moved;
+    }
+
+    public bool MoveSymbolDown(WatchedSymbol symbol)
+    {
+        symbol = new WatchedSymbol(symbol.Market, WatchedSymbol.NormalizeSymbol(symbol.Symbol));
+        bool moved = false;
+        lock (_symbolsLock)
+        {
+            int index = _symbols.FindIndex(existing => existing.Market == symbol.Market && string.Equals(existing.Symbol, symbol.Symbol, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0 && index < _symbols.Count - 1)
+            {
+                var item = _symbols[index];
+                _symbols.RemoveAt(index);
+                _symbols.Insert(index + 1, item);
+                SaveSymbols();
+                moved = true;
+            }
+        }
+        if (moved) SymbolsChanged?.Invoke(this, EventArgs.Empty);
+        return moved;
+    }
+
     private static string SettingsJsonPath()
     {
 #if DEBUG

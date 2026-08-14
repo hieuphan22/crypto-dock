@@ -120,7 +120,7 @@ internal sealed partial class CryptoDockBand : WrappedDockItem, IDisposable
         _items = _settingsManager.Symbols
             .ToDictionary(
                 symbol => symbol.Key,
-                symbol => new CryptoTickerDockItem(symbol));
+                symbol => new CryptoTickerDockItem(symbol, _settingsManager));
 
         Items = _items.Values.ToArray();
         _volatilityAlerts.KeepSymbols(_items.Keys);
