@@ -43,19 +43,40 @@ internal sealed partial class CryptoDockPage : DynamicListPage
                 .GetResult();
 
             return tickers
-                .Select(ticker => new ListItem(new CopyTextCommand(ticker.Summary) { Name = "Copy price" })
+                .Select(ticker => 
                 {
-                    Title = ticker.Summary,
-                    Subtitle = $"24h high {ticker.HighPrice:#,0.####} | low {ticker.LowPrice:#,0.####}",
-                    Icon = new IconInfo(ticker.DirectionIcon),
-                    MoreCommands =
-                    [
-                        new CommandContextItem(new CopyTextCommand(ticker.DetailsText) { Name = "Copy details" }),
-                        new CommandContextItem(new OpenUrlCommand(BinanceUrl(ticker)) { Name = "Open Binance" }),
-                        new CommandContextItem(new MoveUpCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
-                        new CommandContextItem(new MoveDownCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
-                        new CommandContextItem(new RemoveSymbolCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
-                    ],
+                    IconInfo iconInfo;
+                    if (ticker.HasLogo && !string.IsNullOrEmpty(ticker.LogoUrl))
+                    {
+                        try
+                        {
+                            var iconData = new IconData(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromUri(new Uri(ticker.LogoUrl)));
+                            iconInfo = new IconInfo(iconData);
+                        }
+                        catch
+                        {
+                            iconInfo = new IconInfo(ticker.DirectionIcon);
+                        }
+                    }
+                    else
+                    {
+                        iconInfo = new IconInfo(ticker.DirectionIcon);
+                    }
+
+                    return new ListItem(new CopyTextCommand(ticker.Summary) { Name = "Copy price" })
+                    {
+                        Title = ticker.Summary,
+                        Subtitle = $"24h high {ticker.HighPrice:#,0.####} | low {ticker.LowPrice:#,0.####}",
+                        Icon = iconInfo,
+                        MoreCommands =
+                        [
+                            new CommandContextItem(new CopyTextCommand(ticker.DetailsText) { Name = "Copy details" }),
+                            new CommandContextItem(new OpenUrlCommand(BinanceUrl(ticker)) { Name = "Open Binance" }),
+                            new CommandContextItem(new MoveUpCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
+                            new CommandContextItem(new MoveDownCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
+                            new CommandContextItem(new RemoveSymbolCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
+                        ],
+                    };
                 })
                 .ToArray();
         }
