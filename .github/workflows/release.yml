@@ -17,7 +17,9 @@ permissions:
 jobs:
   package-release:
     runs-on: windows-latest
-    shell: pwsh
+    defaults:
+      run:
+        shell: pwsh
 
     steps:
       - name: Checkout repository
@@ -32,12 +34,14 @@ jobs:
 
       - name: Resolve version and update AppxManifest
         id: version
+        env:
+          INPUT_PACKAGE_VERSION: ${{ inputs.package_version }}
         run: |
           $manifestPath = "CryptoDock/Package.appxmanifest"
           [xml]$manifest = Get-Content $manifestPath -Raw
           $manifestVersion = $manifest.Package.Identity.Version
 
-          $requested = "${{ inputs.package_version }}".Trim()
+          $requested = "$env:INPUT_PACKAGE_VERSION".Trim()
           if ([string]::IsNullOrWhiteSpace($requested) -and $env:GITHUB_REF -like "refs/tags/v*") {
             $tag = $env:GITHUB_REF_NAME
             $numericPart = ($tag -replace '^v', '') -split '-' | Select-Object -First 1
