@@ -23,9 +23,40 @@ public sealed record CryptoTicker(
         ? Symbol[..^4]
         : Symbol;
 
-    public string PriceText => LastPrice >= 100
-        ? LastPrice.ToString("#,0.##", CultureInfo.InvariantCulture)
-        : LastPrice.ToString("#,0.####", CultureInfo.InvariantCulture);
+    private static readonly string[] SmallPriceFormats =
+    [
+        "0.####",
+        "0.#####",
+        "0.######",
+        "0.#######",
+        "0.########",
+        "0.#########",
+        "0.##########",
+    ];
+
+    public string PriceText => FormatPrice(LastPrice);
+
+    public static string FormatPrice(decimal price)
+    {
+        if (price <= 0m)
+        {
+            return "0";
+        }
+
+        if (price >= 100m)
+        {
+            return price.ToString("#,0.##", CultureInfo.InvariantCulture);
+        }
+
+        if (price >= 1m)
+        {
+            return price.ToString("#,0.####", CultureInfo.InvariantCulture);
+        }
+
+        int leadingZeroAdjustedDecimals = (int)Math.Ceiling(-Math.Log10((double)price)) + 3;
+        int decimals = Math.Clamp(leadingZeroAdjustedDecimals, 4, 10);
+        return price.ToString(SmallPriceFormats[decimals - 4], CultureInfo.InvariantCulture);
+    }
 
     public string ChangeText
     {
@@ -53,5 +84,5 @@ public sealed record CryptoTicker(
     public string Summary => $"{Pair} [{ShortMarketLabel}] {PriceText} ({ChangeText})";
 
     public string DetailsText =>
-        $"{Pair}\nMarket: {MarketLabel}\nPrice: {PriceText} USDT\n24h: {ChangeText}\nHigh: {HighPrice:#,0.####}\nLow: {LowPrice:#,0.####}\nVolume: {Volume:#,0.##}\nUpdated: {UpdatedAt:HH:mm:ss}";
+        $"{Pair}\nMarket: {MarketLabel}\nPrice: {PriceText} USDT\n24h: {ChangeText}\nHigh: {FormatPrice(HighPrice)}\nLow: {FormatPrice(LowPrice)}\nVolume: {Volume:#,0.##}\nUpdated: {UpdatedAt:HH:mm:ss}";
 }

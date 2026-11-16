@@ -1,20 +1,16 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CryptoDock;
 
-internal sealed class CryptoTickerService : IDisposable
+internal sealed partial class CryptoTickerService : IDisposable
 {
-    private readonly SettingsManager _settingsManager;
+    private static readonly TimeSpan BapiRetryCooldown = TimeSpan.FromMinutes(1);
 
-    public CryptoTickerService(SettingsManager settingsManager)
-    {
-        _settingsManager = settingsManager;
-    }
-
-    public static readonly string[] DefaultSymbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"];
     private IReadOnlyList<CryptoSymbol>? _spotExchangeSymbols;
     private IReadOnlyList<CryptoSymbol>? _futuresExchangeSymbols;
 
@@ -47,7 +43,8 @@ internal sealed class CryptoTickerService : IDisposable
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, BapiAssetInfo> _bapiCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string?> _coingeckoCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _githubLogoCache = new(StringComparer.OrdinalIgnoreCase);
-    private bool _bapiLoaded = false;
+    private bool _bapiLoaded;
+    private DateTimeOffset _lastBapiFailureUtc = DateTimeOffset.MinValue;
     private readonly SemaphoreSlim _bapiLock = new(1, 1);
 
     private record BapiAssetInfo(string AssetName, string LogoUrl);
@@ -81,14 +78,38 @@ internal sealed class CryptoTickerService : IDisposable
         }
 
         List<CryptoTicker> results = [];
+        Exception? firstFailure = null;
 
         foreach (IGrouping<MarketKind, WatchedSymbol> marketGroup in requestedSymbols.GroupBy(symbol => symbol.Market))
         {
             if (marketGroup.Key == MarketKind.Futures)
             {
-                foreach (WatchedSymbol symbol in marketGroup)
+                var futuresTasks = marketGroup.Select(async symbol =>
                 {
-                    results.Add(await GetTickerAsync(symbol, cancellationToken));
+                    try
+                    {
+                        return (Ticker: (CryptoTicker?)await GetTickerAsync(symbol, cancellationToken), Error: (Exception?)null);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        return (Ticker: (CryptoTicker?)null, Error: (Exception?)ex);
+                    }
+                });
+
+                foreach ((CryptoTicker? ticker, Exception? error) in await Task.WhenAll(futuresTasks))
+                {
+                    if (ticker is not null)
+                    {
+                        results.Add(ticker);
+                    }
+                    else
+                    {
+                        firstFailure ??= error;
+                    }
                 }
 
                 continue;
@@ -116,8 +137,13 @@ internal sealed class CryptoTickerService : IDisposable
             var tasks = tickers
                 .Where(ticker => !string.IsNullOrWhiteSpace(ticker.Symbol) && !string.IsNullOrWhiteSpace(ticker.LastPrice))
                 .Select(ticker => CreateTickerAsync(marketGroup.Key, ticker.Symbol!, ticker, cancellationToken));
-            
+
             results.AddRange(await Task.WhenAll(tasks));
+        }
+
+        if (results.Count == 0 && firstFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(firstFailure).Throw();
         }
 
         return results
@@ -127,37 +153,58 @@ internal sealed class CryptoTickerService : IDisposable
 
     private async Task EnsureBapiLoadedAsync(CancellationToken cancellationToken)
     {
-        if (_bapiLoaded) return;
+        if (_bapiLoaded || DateTimeOffset.UtcNow - _lastBapiFailureUtc < BapiRetryCooldown)
+        {
+            return;
+        }
 
         await _bapiLock.WaitAsync(cancellationToken);
         try
         {
-            if (_bapiLoaded) return;
+            if (_bapiLoaded || DateTimeOffset.UtcNow - _lastBapiFailureUtc < BapiRetryCooldown)
+            {
+                return;
+            }
 
             using var response = await _bapiHttpClient.GetAsync("https://www.binance.com/bapi/asset/v2/public/asset/asset/get-all-asset", cancellationToken);
-            if (response.IsSuccessStatusCode)
+            if (!response.IsSuccessStatusCode)
             {
-                await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-                
-                if (doc.RootElement.TryGetProperty("data", out JsonElement dataElement) && dataElement.ValueKind == JsonValueKind.Array)
+                _lastBapiFailureUtc = DateTimeOffset.UtcNow;
+                return;
+            }
+
+            await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+            if (doc.RootElement.TryGetProperty("data", out JsonElement dataElement) && dataElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement asset in dataElement.EnumerateArray())
                 {
-                    foreach (JsonElement asset in dataElement.EnumerateArray())
+                    if (asset.TryGetProperty("assetCode", out JsonElement codeElement) && codeElement.ValueKind == JsonValueKind.String &&
+                        asset.TryGetProperty("assetName", out JsonElement nameElement) && nameElement.ValueKind == JsonValueKind.String &&
+                        asset.TryGetProperty("logoUrl", out JsonElement logoElement) && logoElement.ValueKind == JsonValueKind.String)
                     {
-                        if (asset.TryGetProperty("assetCode", out JsonElement codeElement) && codeElement.ValueKind == JsonValueKind.String &&
-                            asset.TryGetProperty("assetName", out JsonElement nameElement) && nameElement.ValueKind == JsonValueKind.String &&
-                            asset.TryGetProperty("logoUrl", out JsonElement logoElement) && logoElement.ValueKind == JsonValueKind.String)
-                        {
-                            _bapiCache[codeElement.GetString()!] = new BapiAssetInfo(nameElement.GetString()!, logoElement.GetString()!);
-                        }
+                        _bapiCache[codeElement.GetString()!] = new BapiAssetInfo(nameElement.GetString()!, logoElement.GetString()!);
                     }
                 }
+
+                if (!_bapiCache.IsEmpty)
+                {
+                    _bapiLoaded = true;
+                }
             }
-            _bapiLoaded = true;
+            else
+            {
+                _lastBapiFailureUtc = DateTimeOffset.UtcNow;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
-            // Ignore errors
+            _lastBapiFailureUtc = DateTimeOffset.UtcNow;
         }
         finally
         {
@@ -167,92 +214,11 @@ internal sealed class CryptoTickerService : IDisposable
 
     private async Task<CryptoTicker> CreateTickerAsync(MarketKind market, string symbol, BinanceTickerResponse ticker, CancellationToken cancellationToken)
     {
-        string baseAsset = symbol.EndsWith("USDT", StringComparison.OrdinalIgnoreCase) 
-            ? symbol[..^4].ToUpperInvariant() 
+        string baseAsset = symbol.EndsWith("USDT", StringComparison.OrdinalIgnoreCase)
+            ? symbol[..^4].ToUpperInvariant()
             : symbol.ToUpperInvariant();
 
-        await EnsureBapiLoadedAsync(cancellationToken);
-
-        bool hasLogo = false;
-        string? logoUrl = null;
-        string? fullName = null;
-
-        if (_bapiCache.TryGetValue(baseAsset, out BapiAssetInfo? info))
-        {
-            fullName = info.AssetName;
-            logoUrl = info.LogoUrl;
-            hasLogo = !string.IsNullOrWhiteSpace(logoUrl);
-        }
-        else
-        {
-            if (_coingeckoCache.TryGetValue(baseAsset, out string? cachedCgUrl))
-            {
-                logoUrl = cachedCgUrl;
-                hasLogo = !string.IsNullOrWhiteSpace(logoUrl);
-            }
-            else
-            {
-                try
-                {
-                    using var cgRequest = new HttpRequestMessage(HttpMethod.Get, $"https://api.coingecko.com/api/v3/search?query={baseAsset}");
-                    using var cgResponse = await _coingeckoHttpClient.SendAsync(cgRequest, cancellationToken);
-                    if (cgResponse.IsSuccessStatusCode)
-                    {
-                        await using Stream stream = await cgResponse.Content.ReadAsStreamAsync(cancellationToken);
-                        using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-                        
-                        if (doc.RootElement.TryGetProperty("coins", out JsonElement coinsElement) && coinsElement.ValueKind == JsonValueKind.Array && coinsElement.GetArrayLength() > 0)
-                        {
-                            JsonElement bestMatch = coinsElement[0];
-                            foreach (JsonElement coin in coinsElement.EnumerateArray())
-                            {
-                                if (coin.TryGetProperty("symbol", out JsonElement symElement) && 
-                                    symElement.ValueKind == JsonValueKind.String && 
-                                    string.Equals(symElement.GetString(), baseAsset, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    bestMatch = coin;
-                                    break;
-                                }
-                            }
-
-                            if (bestMatch.TryGetProperty("large", out JsonElement largeElement) && largeElement.ValueKind == JsonValueKind.String)
-                            {
-                                logoUrl = largeElement.GetString();
-                                hasLogo = !string.IsNullOrWhiteSpace(logoUrl);
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                    // Ignore CoinGecko errors
-                }
-                _coingeckoCache[baseAsset] = logoUrl;
-            }
-
-            if (!hasLogo)
-            {
-                logoUrl = $"https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/{baseAsset.ToLowerInvariant()}.png";
-                if (_githubLogoCache.TryGetValue(baseAsset, out bool cachedValue))
-                {
-                    hasLogo = cachedValue;
-                }
-                else
-                {
-                    try
-                    {
-                        using var ghRequest = new HttpRequestMessage(HttpMethod.Head, logoUrl);
-                        using var ghResponse = await _githubHttpClient.SendAsync(ghRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                        hasLogo = ghResponse.IsSuccessStatusCode;
-                    }
-                    catch
-                    {
-                        hasLogo = false;
-                    }
-                    _githubLogoCache[baseAsset] = hasLogo;
-                }
-            }
-        }
+        (string? fullName, string? logoUrl, bool hasLogo) = await ResolveAssetMetadataAsync(baseAsset, cancellationToken);
 
         return new CryptoTicker(
             market,
@@ -266,6 +232,113 @@ internal sealed class CryptoTickerService : IDisposable
             hasLogo,
             logoUrl,
             fullName);
+    }
+
+    private async Task<(string? FullName, string? LogoUrl, bool HasLogo)> ResolveAssetMetadataAsync(string baseAsset, CancellationToken cancellationToken)
+    {
+        await EnsureBapiLoadedAsync(cancellationToken);
+
+        if (_bapiCache.TryGetValue(baseAsset, out BapiAssetInfo? info))
+        {
+            return (info.AssetName, info.LogoUrl, !string.IsNullOrWhiteSpace(info.LogoUrl));
+        }
+
+        string? logoUrl = await ResolveCoinGeckoLogoAsync(baseAsset, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(logoUrl))
+        {
+            return (null, logoUrl, true);
+        }
+
+        string? githubLogoUrl = await ResolveGitHubLogoAsync(baseAsset, cancellationToken);
+        return (null, githubLogoUrl, !string.IsNullOrWhiteSpace(githubLogoUrl));
+    }
+
+    private async Task<string?> ResolveCoinGeckoLogoAsync(string baseAsset, CancellationToken cancellationToken)
+    {
+        if (_coingeckoCache.TryGetValue(baseAsset, out string? cachedCgUrl))
+        {
+            return cachedCgUrl;
+        }
+
+        try
+        {
+            using var cgRequest = new HttpRequestMessage(HttpMethod.Get, $"https://api.coingecko.com/api/v3/search?query={Uri.EscapeDataString(baseAsset)}");
+            using var cgResponse = await _coingeckoHttpClient.SendAsync(cgRequest, cancellationToken);
+            if (!cgResponse.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            string? logoUrl = null;
+            await using Stream stream = await cgResponse.Content.ReadAsStreamAsync(cancellationToken);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+            if (doc.RootElement.TryGetProperty("coins", out JsonElement coinsElement) && coinsElement.ValueKind == JsonValueKind.Array && coinsElement.GetArrayLength() > 0)
+            {
+                JsonElement bestMatch = coinsElement[0];
+                foreach (JsonElement coin in coinsElement.EnumerateArray())
+                {
+                    if (coin.TryGetProperty("symbol", out JsonElement symElement) &&
+                        symElement.ValueKind == JsonValueKind.String &&
+                        string.Equals(symElement.GetString(), baseAsset, StringComparison.OrdinalIgnoreCase))
+                    {
+                        bestMatch = coin;
+                        break;
+                    }
+                }
+
+                if (bestMatch.TryGetProperty("large", out JsonElement largeElement) && largeElement.ValueKind == JsonValueKind.String)
+                {
+                    logoUrl = largeElement.GetString();
+                }
+            }
+
+            _coingeckoCache[baseAsset] = logoUrl;
+            return logoUrl;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<string?> ResolveGitHubLogoAsync(string baseAsset, CancellationToken cancellationToken)
+    {
+        string logoUrl = $"https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/{baseAsset.ToLowerInvariant()}.png";
+        if (_githubLogoCache.TryGetValue(baseAsset, out bool cachedExists))
+        {
+            return cachedExists ? logoUrl : null;
+        }
+
+        try
+        {
+            using var ghRequest = new HttpRequestMessage(HttpMethod.Head, logoUrl);
+            using var ghResponse = await _githubHttpClient.SendAsync(ghRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (ghResponse.IsSuccessStatusCode)
+            {
+                _githubLogoCache[baseAsset] = true;
+                return logoUrl;
+            }
+
+            if (ghResponse.StatusCode == HttpStatusCode.NotFound)
+            {
+                _githubLogoCache[baseAsset] = false;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Do not cache transient network failures as missing icons
+        }
+
+        return null;
     }
 
     public async Task<IReadOnlyList<CryptoSymbol>> SearchSymbolsAsync(string query, MarketSource source, CancellationToken cancellationToken = default)
@@ -346,6 +419,10 @@ internal sealed class CryptoTickerService : IDisposable
     {
         _spotHttpClient.Dispose();
         _futuresHttpClient.Dispose();
+        _bapiHttpClient.Dispose();
+        _coingeckoHttpClient.Dispose();
+        _githubHttpClient.Dispose();
+        _bapiLock.Dispose();
     }
 
     private HttpClient ClientFor(MarketKind market) => market == MarketKind.Futures ? _futuresHttpClient : _spotHttpClient;

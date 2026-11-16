@@ -17,7 +17,7 @@ public sealed partial class CryptoDockCommandsProvider : CommandProvider
         Icon = new IconInfo("\uE8D7");
         Settings = _settingsManager.Settings;
         
-        _tickerService = new CryptoTickerService(_settingsManager);
+        _tickerService = new CryptoTickerService();
 
         _page = new CryptoDockPage(_tickerService, _settingsManager);
         _dockBand = new CryptoDockBand(_tickerService, _settingsManager);
@@ -43,6 +43,7 @@ public sealed partial class CryptoDockCommandsProvider : CommandProvider
 
     public override void Dispose()
     {
+        _page.Dispose();
         _dockBand.Dispose();
         _tickerService.Dispose();
         base.Dispose();

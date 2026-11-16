@@ -1,8 +1,11 @@
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-    <BaseIntermediateOutputPath>C:\tmp\CryptoDockBuildNet10\obj\</BaseIntermediateOutputPath>
-    <BaseOutputPath>C:\tmp\CryptoDockBuildNet10\bin\</BaseOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(CI)' != 'true'">
+    <BaseIntermediateOutputPath>C:\tmp\CryptoDockBuildNet10\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>C:\tmp\CryptoDockBuildNet10\$(MSBuildProjectName)\bin\</BaseOutputPath>
     <RestorePackagesPath>C:\tmp\CryptoDockPackages</RestorePackagesPath>
   </PropertyGroup>
 </Project>

@@ -4,3 +4,6 @@ CryptoDock/bin/
 CryptoDock/obj/
 CryptoDock/*.cer
 CryptoDock/*.pfx
+CryptoDock.Tests/bin/
+CryptoDock.Tests/obj/
+TestResults/

@@ -1,544 +1,342 @@
 # Crypto Dock Agent Context
 
-This document captures the project history, architecture, implementation decisions, and operational notes for future AI agents or developers working on Crypto Dock.
+This document captures the project architecture, build environment, implementation decisions, and operational notes for developers and AI agents working on Crypto Dock.
 
 ## Project Summary
 
-Crypto Dock is a local PowerToys Command Palette extension that adds realtime crypto price tickers to Command Palette Dock.
+Crypto Dock is a local PowerToys Command Palette extension written in C# that adds realtime crypto price tickers to the Command Palette Dock.
 
-The extension is built as a packaged C# Command Palette extension and is intended for local use on the developer's Windows machine. It does not need Microsoft Store or winget distribution.
+It is packaged as a local MSIX COM/WinRT extension intended for local sideloading on Windows rather than Microsoft Store or winget distribution.
 
-GitHub repository:
+Repository:
 
 - `https://github.com/hieuphan22/crypto-dock`
 
-Local repository:
-
-- `E:\source\CryptoDock`
-
 ## Current Tech Stack
 
-- .NET: `net10.0-windows10.0.26100.0`
-- Windows App SDK: `2.2.0`
-- Command Palette SDK: `Microsoft.CommandPalette.Extensions` `0.9.260303001`
-- WinRT server helper: `Shmuelie.WinRTServer` `2.2.1`
-- CsWin32: `Microsoft.Windows.CsWin32` `0.3.275`
-- Runtime identifier: `win-x64`
+- **.NET SDK**: `.NET 10` pinned via `global.json` (`10.0.403`, `rollForward: latestFeature`)
+- **Target Framework**: `net10.0-windows10.0.26100.0` (`AssetTargetFallback`: `net8.0-windows10.0.22000.0`)
+- **Windows App SDK**: `2.2.0`
+- **Command Palette SDK**: `Microsoft.CommandPalette.Extensions` `0.9.260303001`
+- **WinRT Server Helper**: `Shmuelie.WinRTServer` `2.2.1`
+- **CsWin32**: `Microsoft.Windows.CsWin32` `0.3.275`
+- **Runtime Identifier**: `win-x64` (`Platforms`: `x64;arm64`)
 
-PowerToys reference state when checked:
+Reference environment note:
 
-- Installed PowerToys on the machine: `0.100.0`
-- PowerToys `main` used `Microsoft.CommandPalette.Extensions` `0.9.260303001`
-- PowerToys `main` used `.NET 10` for Command Palette-related projects
-- PowerToys `main` used Windows App SDK `2.0.1`
-
-Crypto Dock intentionally keeps Windows App SDK `2.2.0` because it builds and runs correctly and is newer than the PowerToys source reference.
+- Verified against PowerToys `0.103.3062.0` on Windows.
+- `CryptoDock` intentionally keeps `Microsoft.CommandPalette.Extensions` `0.9.260303001` and `Microsoft.WindowsAppSDK` `2.2.0` on `.NET 10` because the combination builds cleanly and runs reliably against the installed Command Palette host.
+- `global.json` is critical on machines that also have `.NET 11` preview/RC SDKs installed, because `.NET 11` breaks CsWinRT `IIDOptimizer` during build unless SDK selection stays on `.NET 10`.
 
 ## Repository Layout
 
 ```text
-E:\source\CryptoDock
+.
+|-- .github
+|   `-- workflows
+|       |-- ci.yml
+|       `-- release.yml
 |-- AGENTS.md
 |-- README.md
 |-- CryptoDock.sln
 |-- Directory.Build.props
 |-- Directory.Packages.props
+|-- global.json
 |-- nuget.config
 |-- .gitignore
-`-- CryptoDock
-    |-- CryptoDock.csproj
-    |-- Package.appxmanifest
-    |-- app.manifest
-    |-- Program.cs
-    |-- CryptoDockExtension.cs
-    |-- CryptoDockCommandsProvider.cs
-    |-- SettingsManager.cs
-    |-- MarketModels.cs
-    |-- Commands
-    |   |-- AddSymbolCommand.cs
-    |   `-- RemoveSymbolCommand.cs
-    |-- Pages
-    |   |-- CryptoDockBand.cs
-    |   |-- CryptoDockPage.cs
-    |   `-- CryptoTickerDockItem.cs
-    |-- Services
-    |   |-- CryptoTicker.cs
-    |   `-- CryptoTickerService.cs
-    `-- Assets
+|-- CryptoDock
+|   |-- CryptoDock.csproj
+|   |-- Package.appxmanifest
+|   |-- app.manifest
+|   |-- Program.cs
+|   |-- CryptoDockExtension.cs
+|   |-- CryptoDockCommandsProvider.cs
+|   |-- SettingsManager.cs
+|   |-- MarketModels.cs
+|   |-- Commands
+|   |   |-- AddSymbolCommand.cs
+|   |   |-- MoveDownCommand.cs
+|   |   |-- MoveUpCommand.cs
+|   |   `-- RemoveSymbolCommand.cs
+|   |-- Pages
+|   |   |-- CryptoDockBand.cs
+|   |   |-- CryptoDockPage.cs
+|   |   `-- CryptoTickerDockItem.cs
+|   |-- Services
+|   |   |-- CryptoTicker.cs
+|   |   |-- CryptoTickerService.cs
+|   |   `-- VolatilityAlertTracker.cs
+|   `-- Assets
+`-- CryptoDock.Tests
+    |-- CryptoDock.Tests.csproj
+    |-- CryptoTickerTests.cs
+    |-- SettingsManagerTests.cs
+    |-- VolatilityAlertTrackerTests.cs
+    `-- WatchedSymbolTests.cs
 ```
 
-## Important Files
+## Build Configuration Files
+
+### `global.json`
+
+Pins the .NET SDK to `10.0.403` with `rollForward: latestFeature` so CLI and IDE builds stay on the `.NET 10` toolchain.
 
 ### `CryptoDock/CryptoDock.csproj`
 
-Defines the packaged Command Palette extension.
+Defines the packaged `WinExe` Command Palette extension:
 
-Important settings:
-
-- `TargetFramework` is `net10.0-windows10.0.26100.0`.
-- `EnableMsixTooling` is enabled.
-- `GenerateAppxPackageOnBuild` is enabled.
-- The project is signed with a local development certificate.
-- Debug builds disable trimming, single-file, and AOT.
-- Release has trim/AOT-related properties, but Release publishing has not been the main path used during development.
+- `TargetFramework`: `net10.0-windows10.0.26100.0`
+- `EnableMsixTooling`: enabled
+- `GenerateAppxPackageOnBuild`: defaults to `true` (overridable via CLI)
+- Local test certificate signing (`CryptoDock_TemporaryKey.pfx`) is enabled automatically when the `.pfx` exists locally and disabled by default on clean clones/CI unless signing properties are passed explicitly
+- Both `Debug` and `Release` disable `PublishTrimmed`, `PublishSingleFile`, and `PublishAot` (Windows App SDK packaged MSIX apps do not support single-file publishing and ILLink trimming conflicts with packaged WinRT builds) while keeping trim/single-file/AOT static analyzers enabled (`0` warnings)
 
 ### `Directory.Packages.props`
 
-Central package versions:
+Central package versions (`ManagePackageVersionsCentrally` enabled in `Directory.Build.props`):
 
 - `Microsoft.CommandPalette.Extensions` `0.9.260303001`
 - `Microsoft.WindowsAppSDK` `2.2.0`
 - `Microsoft.Windows.CsWin32` `0.3.275`
 - `Shmuelie.WinRTServer` `2.2.1`
+- `Microsoft.NET.Test.Sdk` `18.12.0`, `xunit` `2.9.3`, `xunit.runner.visualstudio` `4.0.1` (`CryptoDock.Tests`)
 
 ### `Directory.Build.props`
 
-Build output is redirected away from OneDrive/Unicode paths:
+Redirects local build artifacts outside the workspace tree (`Condition="'$(CI)' != 'true'"`):
 
-- `BaseIntermediateOutputPath`: `C:\tmp\CryptoDockBuildNet10\obj\`
-- `BaseOutputPath`: `C:\tmp\CryptoDockBuildNet10\bin\`
+- `BaseIntermediateOutputPath`: `C:\tmp\CryptoDockBuildNet10\$(MSBuildProjectName)\obj\`
+- `BaseOutputPath`: `C:\tmp\CryptoDockBuildNet10\$(MSBuildProjectName)\bin\`
 - `RestorePackagesPath`: `C:\tmp\CryptoDockPackages`
 
-This was added because CsWinRT/MSBuild had issues when building under the original long OneDrive path containing Vietnamese characters.
+Separating by `$(MSBuildProjectName)` avoids `obj`/`project.assets.json` collisions between `CryptoDock` and `CryptoDock.Tests` while avoiding CsWinRT/MSBuild path-length and non-ASCII/OneDrive path issues on developer machines. In CI (`CI=true`), standard workspace paths are used.
 
 ### `.gitignore`
 
-Ignores local/generated files:
+Ignores local/generated artifacts:
 
 - `.dotnet-home/`
 - `CryptoDock/AppPackages/`
 - `CryptoDock/bin/`
 - `CryptoDock/obj/`
-- local signing certificates: `CryptoDock/*.cer`, `CryptoDock/*.pfx`
+- `CryptoDock/*.cer`, `CryptoDock/*.pfx`
+- `CryptoDock.Tests/bin/`, `CryptoDock.Tests/obj/`, `TestResults/`
 
-Do not commit local certificate files or generated MSIX packages.
+Never commit local certificates, private keys, or generated MSIX packages.
 
 ## Command Palette Architecture
 
-### `CryptoDockCommandsProvider`
+### `Program.cs` & `CryptoDockExtension.cs`
 
-Main `CommandProvider`.
+- `Program.cs` handles `-RegisterProcessAsComServer` activation using `Shmuelie.WinRTServer.ComServer`.
+- `CryptoDockExtension` exposes COM CLSID `106E39F7-BFDD-4C88-A92C-99FE3F765150` (matching `Package.appxmanifest`) and returns `CryptoDockCommandsProvider`.
 
-Responsibilities:
+### `CryptoDockCommandsProvider.cs`
 
-- Sets provider metadata:
+Main `CommandProvider`:
+
+- Provider metadata:
   - `DisplayName`: `Crypto Dock`
   - `Id`: `com.hieuphan.cmdpal.cryptodock`
-  - icon: ticker-style glyph
-- Creates shared singletons for:
+- Instantiates shared instances of:
   - `CryptoTickerService`
   - `SettingsManager`
   - `CryptoDockPage`
   - `CryptoDockBand`
 - Exposes:
-  - `TopLevelCommands()`: management/search page titled `Manage Crypto Dock`
-  - `GetDockBands()`: dock band titled `Crypto Tickers`
-- Disposes the dock band and ticker service.
+  - `TopLevelCommands()`: `Manage Crypto Dock` page plus settings context entry
+  - `GetDockBands()`: `CryptoDockBand` (`Crypto Tickers`)
+- Disposes the management page, dock band, and ticker service on shutdown.
 
-### `CryptoDockPage`
+### `CryptoDockPage.cs`
 
-Inherits `DynamicListPage`.
+Inherits `DynamicListPage` and implements `IDisposable` (`Title`: `Manage Crypto Dock`):
 
-Responsibilities:
-
-- Shows current watched symbols when search text is empty.
-- Searches Binance symbols when the user types.
-- Uses `AddSymbolCommand` and `RemoveSymbolCommand`.
-- Provides context commands:
-  - copy price
-  - copy details
-  - open Binance
-  - remove from dock
-
-Reason for `DynamicListPage`:
-
-- A previous version used `ListPage`, but search text updates were not flowing correctly.
-- `DynamicListPage.UpdateSearchText()` is used to call `RaiseItemsChanged()`.
+- Subscribes to `SettingsManager.SymbolsChanged` so the tracked list or search status updates immediately when symbols are added, removed, or reordered.
+- When search text is empty, loads tracked tickers (including 24h high/low formatted via `CryptoTicker.FormatPrice` and coin logos via `CryptoTickerDockItem.CreateLogoOrFallbackIcon`) with commands:
+  - Default action: `Copy price` (`ticker.Summary`)
+  - `MoreCommands`: `Copy details`, `Open Binance` (`WatchedSymbol.BinanceUrl`), `Move Up`, `Move Down`, `Remove from dock`
+- When search text is entered, searches cached Binance `exchangeInfo` pairs across the configured `MarketSource` scope (up to 25 results) and presents `AddSymbolCommand` or `RemoveSymbolCommand`.
+- Uses `DynamicListPage.UpdateSearchText()` -> `RaiseItemsChanged()`.
 
 Known limitation:
 
-- `GetItems()` is synchronous by SDK design, so it currently calls async Binance APIs with `.GetAwaiter().GetResult()`.
-- This is acceptable for the current small watchlist, but a future optimization could add a local cache and background refresh for the management page.
+- `GetItems()` is synchronous by Command Palette SDK design, so it calls async `CryptoTickerService` methods with `.GetAwaiter().GetResult()`.
 
-### `CryptoDockBand`
+### `CryptoDockBand.cs`
 
-Inherits `WrappedDockItem`.
+Inherits `WrappedDockItem` and implements `IDisposable` (`Id`: `com.hieuphan.cmdpal.cryptodock.band`, display title: `Crypto Tickers`):
 
-Responsibilities:
+- Owns the ordered collection of `CryptoTickerDockItem` instances (guarded by `_itemsLock`).
+- Reuses existing `CryptoTickerDockItem` instances across `RebuildItems()` when symbols are reordered, added, or removed, avoiding transient `"loading"` flickers and icon reloads.
+- Runs an async background polling loop using the user-configured refresh interval and disposes `_refreshLock`, `_refreshSignal`, and `_cancellation` safely when the loop exits.
+- Uses semaphore synchronization to avoid overlapping refresh cycles.
+- Triggers immediate rebuild/refresh on `SettingsManager.SymbolsChanged` and `SettingsManager.SettingsChanged`.
+- Feeds `VolatilityAlertTracker` when volatility alerts are enabled and passes any triggered `VolatilityAlert` to each dock item.
+- Tolerates transient network blips: requires `_consecutiveFailures >= 3` before marking dock items offline.
 
-- Owns the dock ticker list.
-- Runs an async refresh loop.
-- Rebuilds dock items when symbols change.
-- Refreshes immediately when:
-  - symbols are added/removed
-  - refresh interval settings change
-- Uses semaphores to avoid overlapping refresh operations.
-- Marks items offline when a refresh fails.
+Why two items exist in Command Palette:
 
-Important behavior:
+- The top-level command (`Manage Crypto Dock`) is for search, watchlist management, reordering, and settings.
+- The dock band (`Crypto Tickers`) is the live ticker strip intended to be pinned in the Command Palette Dock.
 
-- `GetDockBands()` makes the extension appear as a dock band.
-- The visible dock band name is `Crypto Tickers`.
-- The management command is separate from the dock band and is titled `Manage Crypto Dock`.
+### `CryptoTickerDockItem.cs`
 
-Why two items could appear in Dock:
+Represents one ticker item in `CryptoDockBand`:
 
-- Command Palette can show both the top-level command and the dock band.
-- The top-level command is for management/search/settings.
-- The dock band is the actual ticker row.
-- Users should pin `Crypto Tickers` for dock monitoring and avoid pinning `Manage Crypto Dock` unless they want quick access to settings/search.
+- Displays:
+  - `Title`: `Pair DirectionArrow PriceText` (e.g. `BTC ▲ 95,000`)
+  - `Subtitle`: triggered volatility alert label, or `ShortMarketLabel ChangeText` (`S +2.15%` / `F -1.04%`)
+  - `Icon`: remote coin logo loaded via shared `CreateLogoOrFallbackIcon(...)` (`RandomAccessStreamReference.CreateFromUri`) when `HasLogo` is true, falling back to alert or direction glyph if missing/failing
+- Prevents UI flicker on 10-second polling by diffing `_appliedIconKey`, `Title`, `Subtitle`, and `_copyCommand.Text` before assigning properties.
+- Retains `_lastTicker` so offline transitions preserve the last known price and timestamp.
+- Context menu (`MoreCommands`):
+  - `Copy price`
+  - `Open Binance chart` (`_symbol.BinanceUrl`)
+  - `Move Up` (`MoveUpCommand`)
+  - `Move Down` (`MoveDownCommand`)
+  - `Remove from dock` (`RemoveSymbolCommand`)
 
-### `CryptoTickerDockItem`
+## Data Models & Reordering Commands
 
-Represents one ticker in the dock.
+### `MarketModels.cs`
 
-Displays:
+- `MarketKind`: `Spot`, `Futures`
+- `MarketSource`: `Spot`, `Futures`, `Both`
+- `WatchedSymbol`:
+  - Normalized storage keys: `spot:SYMBOL` / `futures:SYMBOL`
+  - Legacy plain symbols without prefix default to `MarketKind.Spot`
+  - `NormalizeSymbol`: trims whitespace, removes `/`, uppercases
+  - `BinanceUrl`: shared helper generating `https://www.binance.com/en/futures/{Symbol}` for Futures or `https://www.binance.com/en/trade/{BASE}_USDT` for Spot (using `EndsWith("USDT")` / `DisplaySymbol`)
 
-- base symbol, e.g. `BTC`
-- price
-- short market label:
-  - `S` for Spot
-  - `F` for Futures
-- 24h change
-- direction icon
+### `Commands/`
 
-Keeps the last successful ticker so offline state can show the last known price/time.
+- `AddSymbolCommand` / `RemoveSymbolCommand`: add or remove a `WatchedSymbol` via `SettingsManager` and return `CommandResult.KeepOpen()`.
+- `MoveUpCommand` / `MoveDownCommand`: reorder a `WatchedSymbol` in the watchlist via `SettingsManager.MoveSymbolUp` / `MoveSymbolDown`, returning `CommandResult.KeepOpen()` so both Dock items and Management page order update immediately.
 
-## Data Model
+## Settings & Persistence (`SettingsManager.cs`)
 
-### `MarketKind`
+Inherits `JsonSettingsManager`:
 
-```csharp
-public enum MarketKind
-{
-    Spot,
-    Futures,
-}
-```
+- Storage paths:
+  - Constructor accepts optional `settingsDirectoryOverride` (used by unit tests for isolated temporary directories).
+  - `#if DEBUG`: `%USERPROFILE%\.cryptoDock` (`cryptoDock.settings.json` and `cryptoDock.symbols.txt`) so developer MSIX reinstalls preserve local test configs.
+  - Release builds: `Utilities.BaseSettingsPath("Microsoft.CmdPal")` (`cryptoDock.settings.json` and `cryptoDock.symbols.txt`).
+- Default symbols (when `cryptoDock.symbols.txt` does not exist):
+  - `spot:BTCUSDT`
+  - `spot:ETHUSDT`
+- Settings:
+  - **Refresh interval**: `10 seconds`, `30 seconds`, `1 minute`, `5 minutes`
+  - **Search market**: `Spot + Futures`, `Spot only`, `Futures only`
+  - **Volatility alerts enabled**: `false` (disabled by default)
+  - **Volatility analysis window**: `3 minutes`, `5 minutes`, `15 minutes`, `1 hour`
+  - **Dump threshold** (% drop from window high): `1%`, `3%`, `5%`, `10%`
+  - **Pump warning threshold** (% gain from window low): `1%`, `3%`, `5%`, `10%`
+  - **Swing range threshold** (% high-low range in window): `1%`, `2%`, `5%`, `10%`, `15%`
+- Events:
+  - `SymbolsChanged`: raised after add, remove, move up, or move down
+  - `SettingsChanged`: raised when Command Palette saves settings updates
 
-### `MarketSource`
+## Market Data, Logo Fallback & Volatility Tracking
 
-Used by settings to control search scope:
+### `CryptoTickerService.cs` & `CryptoTicker.cs`
 
-```csharp
-public enum MarketSource
-{
-    Spot,
-    Futures,
-    Both,
-}
-```
+- **Price Formatting (`CryptoTicker.FormatPrice`)**: Formats `>= 100` with `#,0.##`, `>= 1` with `#,0.####`, and sub-`$1` tokens dynamically up to 10 decimal places so low-priced meme coins remain accurate in `PriceText`, `DetailsText`, and `CryptoDockPage`.
+- **HTTP Clients & Timeouts**:
+  - Spot client: `https://api.binance.com` (`/api/v3/ticker/24hr`, `/api/v3/exchangeInfo`, 8s timeout)
+  - Futures client: `https://fapi.binance.com` (`/fapi/v1/ticker/24hr`, `/fapi/v1/exchangeInfo`, 8s timeout)
+  - BAPI client (`get-all-asset`, 10s timeout)
+  - CoinGecko client (`/api/v3/search`, 5s timeout, `User-Agent: CryptoDock/2.0`)
+  - GitHub icon probe client (`spothq/cryptocurrency-icons`, 5s timeout, `User-Agent: CryptoDock/2.0`)
+  - All `HttpClient` instances and `_bapiLock` (`SemaphoreSlim`) are disposed in `CryptoTickerService.Dispose()`.
+- **JSON Serialization**:
+  - Uses `System.Text.Json` source generation (`CryptoDockJsonContext`) with explicit `[JsonPropertyName]` mappings.
+- **Ticker Polling**:
+  - Spot tickers use batched `?symbols=[...]` requests.
+  - Futures tickers are requested concurrently per symbol (`Task.WhenAll`) with per-symbol exception isolation when any ticker succeeds; if every requested ticker fails (`results.Count == 0` with an error), `GetTickersAsync` rethrows the failure so `CryptoDockBand` can enter offline mode even on Futures-only watchlists.
+- **Symbol Search**:
+  - Caches Binance `exchangeInfo` in memory per market and filters to `status == "TRADING"` with `quoteAsset == "USDT"`.
+- **3-Tier Logo & Asset Name Resolution** (transient network errors are not cached permanently):
+  1. Binance BAPI (`get-all-asset`, loaded under `_bapiLock` and cached in `_bapiCache`; retries after a 1-minute cooldown if loading fails)
+  2. CoinGecko `/api/v3/search` matching exact symbol (`StringComparison.OrdinalIgnoreCase`, cached in `_coingeckoCache` only on successful HTTP responses)
+  3. GitHub `spothq/cryptocurrency-icons` PNG URL availability check (cached in `_githubLogoCache` on HTTP 200 or 404 NotFound)
 
-### `WatchedSymbol`
+### `VolatilityAlertTracker.cs`
 
-Stores one tracked symbol with market type.
+- Thread-safe (`_lock`) storage of up to 61 minutes of in-memory 1-minute OHLC bars (`MinuteBar`) per tracked `WatchedSymbol` while alerts are enabled.
+- Evaluates `VolatilityAlertThresholds` (`WindowMinutes`, `DumpThresholdPercent`, `PumpThresholdPercent`, `SwingThresholdPercent`) across the selected rolling window (`3m`, `5m`, `15m`, `1h`).
+- Alert labels (`VolatilityAlertKind`):
+  - `Dump`: `🔴 DUMP -{Percent:0.##}%/{WindowLabel}` (glyph `\uE74B`)
+  - `Pump`: `🟢 PUMP +{Percent:0.##}%/{WindowLabel}` (glyph `\uE74A`)
+  - `Swing`: `⚡ SWING {Percent:0.##}%/{WindowLabel}` (glyph `\uE7C4`)
 
-Examples:
+## Testing (`CryptoDock.Tests`)
 
-- `spot:BTCUSDT`
-- `futures:XAUUSDT`
+- Uses xUnit (`Microsoft.NET.Test.Sdk`, `xunit`, `xunit.runner.visualstudio`).
+- Links domain/service source files directly (`MarketModels.cs`, `SettingsManager.cs`, `Services/CryptoTicker.cs`, `Services/VolatilityAlertTracker.cs`) without referencing `Microsoft.WindowsAppSDK`, avoiding unpackaged `WindowsAppRuntime` module-initializer crashes inside `testhost.exe` while testing the exact production source code.
+- Covers `CryptoTicker.FormatPrice` / properties, `WatchedSymbol.Parse` / `BinanceUrl`, `VolatilityAlertTracker` threshold & rolling-window behavior, and isolated `SettingsManager` CRUD/migration.
 
-Legacy plain symbols migrate to Spot.
+## Build, Test & Release Automation
 
-Symbol normalization:
-
-- trims whitespace
-- removes `/`
-- uppercases
-
-## Settings and Persistence
-
-Implemented in `SettingsManager`, which inherits `JsonSettingsManager`.
-
-Settings file:
-
-- `%LOCALAPPDATA%\Microsoft.CmdPal\cryptoDock.settings.json`
-
-Watched symbols file:
-
-- `%LOCALAPPDATA%\Microsoft.CmdPal\cryptoDock.symbols.txt`
-
-Default symbols:
-
-- `spot:BTCUSDT`
-- `spot:ETHUSDT`
-- `spot:BNBUSDT`
-- `spot:SOLUSDT`
-- `spot:XRPUSDT`
-
-Settings:
-
-- Refresh interval:
-  - `10 seconds`
-  - `30 seconds`
-  - `1 minute`
-  - `5 minutes`
-- Search market:
-  - `Spot + Futures`
-  - `Spot only`
-  - `Futures only`
-- Optional volatility alerts with configurable analysis window and thresholds.
-
-Events:
-
-- `SymbolsChanged`: raised after add/remove.
-- `SettingsChanged`: raised when Command Palette settings change.
-
-`CryptoDockBand` subscribes to both events.
-
-## Binance Integration
-
-Implemented in `CryptoTickerService`.
-
-HTTP clients:
-
-- Spot:
-  - base URL: `https://api.binance.com`
-  - ticker path: `/api/v3/ticker/24hr`
-  - exchange info path: `/api/v3/exchangeInfo`
-- Futures:
-  - base URL: `https://fapi.binance.com`
-  - ticker path: `/fapi/v1/ticker/24hr`
-  - exchange info path: `/fapi/v1/exchangeInfo`
-
-Timeout:
-
-- 8 seconds
-
-JSON:
-
-- Uses `System.Text.Json` source generation via `CryptoDockJsonContext`.
-- Response records use `[JsonPropertyName]` because Binance JSON fields are camelCase.
-
-Search:
-
-- Calls Binance `exchangeInfo`.
-- Caches symbols in memory per market.
-- Only returns symbols where:
-  - `status == TRADING`
-  - `quoteAsset == USDT`
-  - symbol/base asset are not empty
-
-Ticker loading:
-
-- Spot tickers are fetched in batch with the `symbols` parameter.
-- Futures tickers are fetched individually.
-
-Reason:
-
-- During development, Binance futures ticker batch behavior was not reliable for filtered symbol requests and could return large/unfiltered data. Individual requests were more predictable for the current small watchlist.
-
-## Feature History
-
-Implemented features:
-
-- Initial PowerToys Command Palette extension scaffold.
-- Local MSIX packaging.
-- Local test certificate generation and signing.
-- Binance realtime price loading.
-- JSON source generation and Binance field mapping.
-- Command Palette Dock band support with `GetDockBands()`.
-- Multiple default tickers.
-- Copy price and copy details commands.
-- Open Binance command.
-- Search/add symbols from Command Palette.
-- Persistent watchlist.
-- Remove symbols from dock.
-- Refresh interval setting.
-- Spot/Futures search setting.
-- Futures support for symbols such as `XAUUSDT` and `XAGUSDT`.
-- Renamed management page to `Manage Crypto Dock`.
-- Renamed actual dock band to `Crypto Tickers`.
-- Optional rolling volatility alerts:
-  - disabled by default
-  - analysis window: 15 minutes or 1 hour
-  - separate dump, rebound, and high-low range thresholds
-  - fixed 60-minute in-memory OHLC history per tracked coin while enabled
-- Upgraded project to `.NET 10`.
-- Moved source from OneDrive path to `E:\source\CryptoDock`.
-- Moved git repo to `E:\source\CryptoDock`.
-- Created GitHub repo and pushed to `hieuphan22/crypto-dock`.
-
-## Build
-
-Recommended build command:
+### Unit Tests
 
 ```powershell
-cd E:\source\CryptoDock
+$env:DOTNET_CLI_HOME = (Join-Path (Get-Location) '.dotnet-home')
+dotnet test .\CryptoDock.Tests\CryptoDock.Tests.csproj --nologo --verbosity minimal
+```
+
+### Build
+
+```powershell
 $env:DOTNET_CLI_HOME = (Join-Path (Get-Location) '.dotnet-home')
 dotnet build .\CryptoDock.sln --nologo --verbosity minimal
 ```
 
-Expected output:
+Expected outputs:
 
-- DLL output:
-  - `C:\tmp\CryptoDockBuildNet10\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\CryptoDock.dll`
-- MSIX package:
-  - `E:\source\CryptoDock\CryptoDock\AppPackages\CryptoDock_1.0.0.0_x64_Debug_Test\CryptoDock_1.0.0.0_x64_Debug.msix`
+- DLL output: `C:\tmp\CryptoDockBuildNet10\CryptoDock\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\CryptoDock.dll`
+- MSIX package: `CryptoDock\AppPackages\CryptoDock_1.0.0.0_x64_Debug_Test\CryptoDock_1.0.0.0_x64_Debug.msix`
 
-Known warning:
+### GitHub Actions Workflows
 
-- Build may warn that `mspdbcmf.exe` is missing.
-- This only means no symbols package is generated.
-- The MSIX itself still builds and signs correctly.
+- `.github/workflows/ci.yml`: builds `Release` & `Debug` (`GenerateAppxPackageOnBuild=false`) and executes `CryptoDock.Tests` on `windows-latest`.
+- `.github/workflows/release.yml`: triggered by `v*` tags or `workflow_dispatch`; runs unit tests, updates `Package.appxmanifest` version, builds and signs the Release x64 MSIX (using `MSIX_CERT_BASE64`/`MSIX_CERT_PASSWORD` secrets when present or an ephemeral `CN=CryptoDock` self-signed cert), uploads the `.zip` artifact, and publishes a GitHub Release on `v*` tags.
 
-## Install Locally
+Known harmless build notes:
 
-Build first, then run:
+- Missing `mspdbcmf.exe` warning only prevents `.appxsym` symbol-package generation; the signed MSIX package still builds cleanly.
+- If a background VBCSCompiler build server locks `CryptoDock.dll` in `obj\`, run `dotnet build-server shutdown` and rebuild.
+
+### Install Locally
 
 ```powershell
-cd E:\source\CryptoDock\CryptoDock\AppPackages\CryptoDock_1.0.0.0_x64_Debug_Test
+cd .\CryptoDock\AppPackages\CryptoDock_1.0.0.0_x64_Debug_Test
+Get-AppxPackage *CryptoDock* | Remove-AppxPackage
 .\Install.ps1 -Force
 ```
 
-If certificate trust is needed:
+If certificate trust is needed on a fresh machine:
 
 ```powershell
 Import-Certificate -FilePath .\CryptoDock_1.0.0.0_x64_Debug.cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople
 ```
 
-Then reload Command Palette:
-
-- Open PowerToys Command Palette.
-- Run `Reload Command Palette Extension`.
-- Enable Dock if needed.
-- Pin `Crypto Tickers`.
-
-## Git
-
-Repository:
-
-```text
-https://github.com/hieuphan22/crypto-dock
-```
-
-Local branch:
-
-```text
-main
-```
-
-Remote:
-
-```text
-origin  https://github.com/hieuphan22/crypto-dock.git
-```
-
-Local git identity:
-
-```text
-user.name  Hieu Phan
-user.email phantrunghieu2210@gmail.com
-```
-
-## Naming Decision
-
-Chosen repository name:
-
-```text
-crypto-dock
-```
-
-Reasoning:
-
-- Short and easy to remember.
-- Easy to search.
-- Matches the PowerToys Command Palette Dock feature.
-- Does not lock the project to Binance forever.
-- Leaves room for future providers such as TradingView, CoinGecko, or other exchanges.
-
-Alternative names considered:
-
-- `crypto-binance-dock`
-- `binance-price-dock`
-- `command-palette-crypto-dock`
-- `crypto-ticker-dock`
-
-## Known Good Runtime Behavior
-
-The extension has been validated locally with PowerToys Command Palette Dock:
-
-- Dock displays multiple ticker items.
-- BTC, ETH, BNB, SOL, XRP spot prices show correctly.
-- Search/add works for additional symbols.
-- Futures search was added for symbols not available on Spot.
-- Refresh interval settings are available.
-- Spot/Futures search scope settings are available.
-
-## Known Limitations and Future Work
-
-### Management page async behavior
-
-`CryptoDockPage.GetItems()` currently blocks on async network calls because Command Palette list item generation is synchronous.
-
-Potential future improvement:
-
-- Add a ticker/search cache.
-- Return cached results immediately.
-- Refresh page data in the background.
-- Call `RaiseItemsChanged()` after background refresh.
-
-### Error handling granularity
-
-Current dock refresh marks all items offline if the whole refresh operation fails.
-
-Potential future improvement:
-
-- Track failures per symbol.
-- Keep successful symbols updated even if one symbol fails.
-- Add subtle per-symbol stale/offline status.
-
-### Provider abstraction
-
-Currently the data provider is Binance-specific.
-
-Potential future improvement:
-
-- Introduce `IMarketDataProvider`.
-- Add provider settings.
-- Support TradingView/CoinGecko/other exchanges.
-
-### Release publishing
-
-The current workflow is local debug MSIX installation.
-
-Potential future improvement:
-
-- Validate Release build.
-- Validate trimming/AOT behavior.
-- Decide whether to keep self-contained/single-file release settings.
+Then open PowerToys Command Palette, run **Reload Command Palette Extension**, enable Dock if needed, and pin **Crypto Tickers**.
 
 ## Development Rules for Future Agents
 
-- Prefer Microsoft Command Palette Toolkit types over raw interfaces unless there is a clear reason.
-- Keep the dock band and management page separate.
-- Do not commit local signing certificates or generated MSIX packages.
-- Do not hard-code new symbols into source unless they are intentional defaults.
-- Persist user-selected symbols through `SettingsManager`.
-- Preserve Spot/Futures market labels because the same symbol may exist in both markets.
-- Avoid frequent polling beyond user-selected interval.
-- Keep Binance API calls minimal:
-  - batch Spot requests where possible
-  - keep Futures predictable for the small watchlist
-- After changing code, run:
-
-```powershell
-cd E:\source\CryptoDock
-$env:DOTNET_CLI_HOME = (Join-Path (Get-Location) '.dotnet-home')
-dotnet build .\CryptoDock.sln --nologo --verbosity minimal
-```
-
-- After rebuilding, reinstall from:
-
-```text
-E:\source\CryptoDock\CryptoDock\AppPackages\CryptoDock_1.0.0.0_x64_Debug_Test
-```
+- Keep personal information (emails, usernames, private machine paths) out of tracked repository docs and source files.
+- Keep `global.json` pinned to `.NET 10` so CsWinRT builds remain stable when newer preview SDKs are installed.
+- Prefer Microsoft Command Palette Toolkit types over raw WinRT/COM interfaces unless clearly required.
+- Keep the dock band (`CryptoDockBand`) and management page (`CryptoDockPage`) separate.
+- Never commit local `.cer`/`.pfx` signing certificates or generated `AppPackages/` MSIX files.
+- Do not hard-code extra watchlist symbols beyond the intentional `BTCUSDT`/`ETHUSDT` defaults; persist user choices in `SettingsManager`.
+- Preserve Spot/Futures market labels and shared helpers (`WatchedSymbol.BinanceUrl`, `SettingsManager`).
+- Avoid unnecessary API polling beyond the user-selected interval; keep Spot requests batched and Futures failures isolated per symbol.
+- After any code edit, rebuild `CryptoDock.sln` and reinstall the MSIX locally to verify packaging and runtime behavior.
 
 ## Useful Microsoft Docs
 
-- Command Palette extension creation:
-  - `https://learn.microsoft.com/windows/powertoys/command-palette/creating-an-extension`
-- Command Palette SDK namespaces:
-  - `https://learn.microsoft.com/windows/powertoys/command-palette/sdk-namespaces`
-- Command Palette Toolkit:
-  - `https://learn.microsoft.com/windows/powertoys/command-palette/microsoft-commandpalette-extensions-toolkit/`
+- Command Palette extension creation: `https://learn.microsoft.com/windows/powertoys/command-palette/creating-an-extension`
+- Command Palette SDK namespaces: `https://learn.microsoft.com/windows/powertoys/command-palette/sdk-namespaces`
+- Command Palette Toolkit: `https://learn.microsoft.com/windows/powertoys/command-palette/microsoft-commandpalette-extensions-toolkit/`

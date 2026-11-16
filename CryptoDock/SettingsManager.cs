@@ -13,6 +13,7 @@ internal sealed class SettingsManager : JsonSettingsManager
     ];
 
     private readonly object _symbolsLock = new();
+    private readonly string _settingsDirectory;
     private List<WatchedSymbol> _symbols = [];
 
     public event EventHandler? SymbolsChanged;
@@ -69,13 +70,13 @@ internal sealed class SettingsManager : JsonSettingsManager
 
     private readonly ChoiceSetSetting _reboundThreshold = new(
         Namespaced(nameof(ReboundThresholdPercent)),
-        "Rebound warning threshold",
+        "Pump warning threshold",
         "Alert when the current price rises this far from the window low.",
         PercentageChoices("1", "3", "5", "10"));
 
     private readonly ChoiceSetSetting _rangeThreshold = new(
         Namespaced(nameof(RangeThresholdPercent)),
-        "Volatility range threshold",
+        "Swing range threshold",
         "Alert when the high-to-low range reaches this size within the window.",
         PercentageChoices("1", "2", "5", "10", "15"));
 
@@ -108,8 +109,9 @@ internal sealed class SettingsManager : JsonSettingsManager
         }
     }
 
-    public SettingsManager()
+    public SettingsManager(string? settingsDirectoryOverride = null)
     {
+        _settingsDirectory = ResolveSettingsDirectory(settingsDirectoryOverride);
         FilePath = SettingsJsonPath();
 
         _volatilityWindow.Value = "15";
@@ -219,27 +221,29 @@ internal sealed class SettingsManager : JsonSettingsManager
         return moved;
     }
 
-    private static string SettingsJsonPath()
+    private static string ResolveSettingsDirectory(string? settingsDirectoryOverride)
     {
+        string directory;
+        if (!string.IsNullOrWhiteSpace(settingsDirectoryOverride))
+        {
+            directory = settingsDirectoryOverride;
+        }
+        else
+        {
 #if DEBUG
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cryptoDock");
+            directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cryptoDock");
 #else
-        string directory = Utilities.BaseSettingsPath("Microsoft.CmdPal");
+            directory = Utilities.BaseSettingsPath("Microsoft.CmdPal");
 #endif
+        }
+
         Directory.CreateDirectory(directory);
-        return Path.Combine(directory, $"{Namespace}.settings.json");
+        return directory;
     }
 
-    private static string SymbolsPath()
-    {
-#if DEBUG
-        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cryptoDock");
-#else
-        string directory = Utilities.BaseSettingsPath("Microsoft.CmdPal");
-#endif
-        Directory.CreateDirectory(directory);
-        return Path.Combine(directory, $"{Namespace}.symbols.txt");
-    }
+    private string SettingsJsonPath() => Path.Combine(_settingsDirectory, $"{Namespace}.settings.json");
+
+    private string SymbolsPath() => Path.Combine(_settingsDirectory, $"{Namespace}.symbols.txt");
 
     private void LoadSymbols()
     {

@@ -3,7 +3,7 @@ using Microsoft.CommandPalette.Extensions.Toolkit;
 
 namespace CryptoDock;
 
-internal sealed partial class CryptoDockPage : DynamicListPage
+internal sealed partial class CryptoDockPage : DynamicListPage, IDisposable
 {
     private readonly CryptoTickerService _tickerService;
     private readonly SettingsManager _settingsManager;
@@ -12,6 +12,7 @@ internal sealed partial class CryptoDockPage : DynamicListPage
     {
         _tickerService = tickerService;
         _settingsManager = settingsManager;
+        _settingsManager.SymbolsChanged += OnSymbolsChanged;
         Icon = new IconInfo("\uE8D7");
         Title = "Manage Crypto Dock";
         Name = "Open";
@@ -21,6 +22,16 @@ internal sealed partial class CryptoDockPage : DynamicListPage
             Title = "Type a coin symbol to add it to the dock",
             Subtitle = "Examples: ADA, DOGE, XAU, XAG",
         };
+    }
+
+    public void Dispose()
+    {
+        _settingsManager.SymbolsChanged -= OnSymbolsChanged;
+    }
+
+    private void OnSymbolsChanged(object? sender, EventArgs e)
+    {
+        RaiseItemsChanged();
     }
 
     public override void UpdateSearchText(string oldSearch, string newSearch)
@@ -43,38 +54,22 @@ internal sealed partial class CryptoDockPage : DynamicListPage
                 .GetResult();
 
             return tickers
-                .Select(ticker => 
+                .Select(ticker =>
                 {
-                    IconInfo iconInfo;
-                    if (ticker.HasLogo && !string.IsNullOrEmpty(ticker.LogoUrl))
-                    {
-                        try
-                        {
-                            var iconData = new IconData(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromUri(new Uri(ticker.LogoUrl)));
-                            iconInfo = new IconInfo(iconData);
-                        }
-                        catch
-                        {
-                            iconInfo = new IconInfo(ticker.DirectionIcon);
-                        }
-                    }
-                    else
-                    {
-                        iconInfo = new IconInfo(ticker.DirectionIcon);
-                    }
-
+                    IconInfo iconInfo = CryptoTickerDockItem.CreateLogoOrFallbackIcon(ticker, ticker.DirectionIcon);
+                    var watchedSymbol = new WatchedSymbol(ticker.Market, ticker.Symbol);
                     return new ListItem(new CopyTextCommand(ticker.Summary) { Name = "Copy price" })
                     {
                         Title = ticker.Summary,
-                        Subtitle = $"24h high {ticker.HighPrice:#,0.####} | low {ticker.LowPrice:#,0.####}",
+                        Subtitle = $"24h high {CryptoTicker.FormatPrice(ticker.HighPrice)} | low {CryptoTicker.FormatPrice(ticker.LowPrice)}",
                         Icon = iconInfo,
                         MoreCommands =
                         [
                             new CommandContextItem(new CopyTextCommand(ticker.DetailsText) { Name = "Copy details" }),
-                            new CommandContextItem(new OpenUrlCommand(BinanceUrl(ticker)) { Name = "Open Binance" }),
-                            new CommandContextItem(new MoveUpCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
-                            new CommandContextItem(new MoveDownCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
-                            new CommandContextItem(new RemoveSymbolCommand(_settingsManager, new WatchedSymbol(ticker.Market, ticker.Symbol))),
+                            new CommandContextItem(new OpenUrlCommand(watchedSymbol.BinanceUrl) { Name = "Open Binance" }),
+                            new CommandContextItem(new MoveUpCommand(_settingsManager, watchedSymbol)),
+                            new CommandContextItem(new MoveDownCommand(_settingsManager, watchedSymbol)),
+                            new CommandContextItem(new RemoveSymbolCommand(_settingsManager, watchedSymbol)),
                         ],
                     };
                 })
@@ -135,10 +130,4 @@ internal sealed partial class CryptoDockPage : DynamicListPage
         }
     }
 
-    private static string BinanceUrl(CryptoTicker ticker)
-    {
-        return ticker.Market == MarketKind.Futures
-            ? $"https://www.binance.com/en/futures/{ticker.Symbol}"
-            : $"https://www.binance.com/en/trade/{ticker.Symbol.Replace("USDT", "_USDT", StringComparison.OrdinalIgnoreCase)}";
-    }
 }

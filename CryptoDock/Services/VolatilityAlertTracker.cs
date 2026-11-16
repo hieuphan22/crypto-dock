@@ -3,31 +3,55 @@ namespace CryptoDock;
 internal sealed class VolatilityAlertTracker
 {
     private const int HistoryCapacityMinutes = 61;
+    private readonly object _lock = new();
     private readonly Dictionary<string, PriceHistory> _histories = new(StringComparer.OrdinalIgnoreCase);
 
     public VolatilityAlert? Update(CryptoTicker ticker, SettingsManager settings)
     {
-        string key = new WatchedSymbol(ticker.Market, ticker.Symbol).Key;
-        if (!_histories.TryGetValue(key, out PriceHistory? history))
-        {
-            history = new PriceHistory();
-            _histories.Add(key, history);
-        }
+        return Update(
+            ticker,
+            new VolatilityAlertThresholds(
+                settings.VolatilityWindowMinutes,
+                settings.DumpThresholdPercent,
+                settings.ReboundThresholdPercent,
+                settings.RangeThresholdPercent));
+    }
 
-        history.Add(ticker.LastPrice, ticker.UpdatedAt);
-        return history.CreateAlert(settings);
+    public VolatilityAlert? Update(CryptoTicker ticker, VolatilityAlertThresholds thresholds)
+    {
+        string key = new WatchedSymbol(ticker.Market, ticker.Symbol).Key;
+        lock (_lock)
+        {
+            if (!_histories.TryGetValue(key, out PriceHistory? history))
+            {
+                history = new PriceHistory();
+                _histories.Add(key, history);
+            }
+
+            history.Add(ticker.LastPrice, ticker.UpdatedAt);
+            return history.CreateAlert(thresholds);
+        }
     }
 
     public void KeepSymbols(IEnumerable<string> symbolKeys)
     {
         HashSet<string> activeKeys = symbolKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (string key in _histories.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
+        lock (_lock)
         {
-            _histories.Remove(key);
+            foreach (string key in _histories.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
+            {
+                _histories.Remove(key);
+            }
         }
     }
 
-    public void Clear() => _histories.Clear();
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            _histories.Clear();
+        }
+    }
 
     private sealed class PriceHistory
     {
@@ -56,14 +80,14 @@ internal sealed class VolatilityAlertTracker
             };
         }
 
-        public VolatilityAlert? CreateAlert(SettingsManager settings)
+        public VolatilityAlert? CreateAlert(VolatilityAlertThresholds thresholds)
         {
             if (_bars.Count == 0)
             {
                 return null;
             }
 
-            int requestedWindow = Math.Clamp(settings.VolatilityWindowMinutes, 1, HistoryCapacityMinutes - 1);
+            int requestedWindow = Math.Clamp(thresholds.WindowMinutes, 1, HistoryCapacityMinutes - 1);
             DateTimeOffset windowStart = _bars[^1].Minute.AddMinutes(-requestedWindow);
 
             MinuteBar[] window = _bars.Where(bar => bar.Minute >= windowStart).ToArray();
@@ -82,15 +106,15 @@ internal sealed class VolatilityAlertTracker
             decimal dumpPercent = Percentage(high - current, high);
             decimal reboundPercent = Percentage(current - low, low);
             decimal rangePercent = Percentage(high - low, low);
-            bool dump = dumpPercent >= settings.DumpThresholdPercent;
-            bool rebound = reboundPercent >= settings.ReboundThresholdPercent;
-            bool netDrop = netChangePercent <= -settings.DumpThresholdPercent;
-            bool netRise = netChangePercent >= settings.ReboundThresholdPercent;
-            bool volatileRange = rangePercent >= settings.RangeThresholdPercent;
+            bool dump = dumpPercent >= thresholds.DumpThresholdPercent;
+            bool rebound = reboundPercent >= thresholds.PumpThresholdPercent;
+            bool netDrop = netChangePercent <= -thresholds.DumpThresholdPercent;
+            bool netRise = netChangePercent >= thresholds.PumpThresholdPercent;
+            bool volatileRange = rangePercent >= thresholds.SwingThresholdPercent;
 
             if (dump && rebound)
             {
-                return new VolatilityAlert(VolatilityAlertKind.Volatile, rangePercent, windowMinutes);
+                return new VolatilityAlert(VolatilityAlertKind.Swing, rangePercent, windowMinutes);
             }
 
             if (dump || netDrop)
@@ -100,11 +124,11 @@ internal sealed class VolatilityAlertTracker
 
             if (rebound || netRise)
             {
-                return new VolatilityAlert(VolatilityAlertKind.Rebound, Math.Max(reboundPercent, netChangePercent), windowMinutes);
+                return new VolatilityAlert(VolatilityAlertKind.Pump, Math.Max(reboundPercent, netChangePercent), windowMinutes);
             }
 
             return volatileRange
-                ? new VolatilityAlert(VolatilityAlertKind.Volatile, rangePercent, windowMinutes)
+                ? new VolatilityAlert(VolatilityAlertKind.Swing, rangePercent, windowMinutes)
                 : null;
         }
 
@@ -114,11 +138,17 @@ internal sealed class VolatilityAlertTracker
     private readonly record struct MinuteBar(DateTimeOffset Minute, decimal Open, decimal High, decimal Low, decimal Close);
 }
 
+internal readonly record struct VolatilityAlertThresholds(
+    int WindowMinutes,
+    decimal DumpThresholdPercent,
+    decimal PumpThresholdPercent,
+    decimal SwingThresholdPercent);
+
 internal enum VolatilityAlertKind
 {
     Dump,
-    Rebound,
-    Volatile,
+    Pump,
+    Swing,
 }
 
 internal sealed record VolatilityAlert(VolatilityAlertKind Kind, decimal Percent, int WindowMinutes)
@@ -126,14 +156,14 @@ internal sealed record VolatilityAlert(VolatilityAlertKind Kind, decimal Percent
     public string Label => Kind switch
     {
         VolatilityAlertKind.Dump => $"🔴 DUMP -{Percent:0.##}%/{WindowLabel}",
-        VolatilityAlertKind.Rebound => $"🟢 REBOUND +{Percent:0.##}%/{WindowLabel}",
-        _ => $"🟠 VOLATILE {Percent:0.##}%/{WindowLabel}",
+        VolatilityAlertKind.Pump => $"🟢 PUMP +{Percent:0.##}%/{WindowLabel}",
+        _ => $"⚡ SWING {Percent:0.##}%/{WindowLabel}",
     };
 
     public string Icon => Kind switch
     {
         VolatilityAlertKind.Dump => "\uE74B",
-        VolatilityAlertKind.Rebound => "\uE74A",
+        VolatilityAlertKind.Pump => "\uE74A",
         _ => "\uE7C4",
     };
 

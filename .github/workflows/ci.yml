@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      - name: Restore solution
+        run: dotnet restore CryptoDock.sln -p:Platform=x64
+
+      - name: Build Release (app + tests)
+        run: dotnet build CryptoDock.sln --configuration Release -p:Platform=x64 --no-restore -p:GenerateAppxPackageOnBuild=false
+
+      - name: Build Debug (app + tests)
+        run: dotnet build CryptoDock.sln --configuration Debug -p:Platform=x64 --no-restore -p:GenerateAppxPackageOnBuild=false
+
+      - name: Run unit tests
+        run: dotnet test CryptoDock.Tests/CryptoDock.Tests.csproj --configuration Release -p:Platform=x64 --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: "**/test-results.trx"
+          if-no-files-found: ignore

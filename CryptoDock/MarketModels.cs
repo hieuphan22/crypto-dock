@@ -44,6 +44,22 @@ public sealed record WatchedSymbol(MarketKind Market, string Symbol)
         return Spot(trimmed);
     }
 
+    public string BinanceUrl
+    {
+        get
+        {
+            if (Market == MarketKind.Futures)
+            {
+                return $"https://www.binance.com/en/futures/{Symbol}";
+            }
+
+            string spotPair = Symbol.EndsWith("USDT", StringComparison.OrdinalIgnoreCase)
+                ? $"{DisplaySymbol}_USDT"
+                : Symbol;
+            return $"https://www.binance.com/en/trade/{spotPair}";
+        }
+    }
+
     public static string NormalizeSymbol(string symbol)
     {
         return symbol.Trim().Replace("/", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
